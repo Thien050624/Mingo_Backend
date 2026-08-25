@@ -1,0 +1,15 @@
+package com.mingo.backend.admin;
+
+public enum AdminAction {
+    BAN_USER,
+    UNBAN_USER,
+    DELETE_USER,
+    HIDE_POST,
+    UNHIDE_POST,
+    DELETE_POST,
+    DELETE_FORUM_MESSAGE,
+    CLEAR_FORUM_MESSAGES,
+    HIDE_FORUM_MESSAGE,
+    UNHIDE_FORUM_MESSAGE,
+    DELETE_CHAT_MESSAGE
+}

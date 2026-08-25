@@ -1,0 +1,39 @@
+services:
+  postgres:
+    image: postgres:16-alpine
+    container_name: mingo-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_DB: mingo
+      POSTGRES_USER: mingo
+      POSTGRES_PASSWORD: mingo
+    ports:
+      - "5432:5432"
+    volumes:
+      - mingo_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U mingo -d mingo"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  backend:
+    build: .
+    container_name: mingo-backend
+    restart: unless-stopped
+    environment:
+      DB_URL: jdbc:postgresql://postgres:5432/mingo
+      DB_USERNAME: mingo
+      DB_PASSWORD: mingo
+      CORS_ALLOWED_ORIGINS: http://localhost:5173,http://localhost:5174
+    ports:
+      - "8080:8080"
+    volumes:
+      - mingo_uploads:/app/uploads
+    depends_on:
+      postgres:
+        condition: service_healthy
+
+volumes:
+  mingo_postgres_data:
+  mingo_uploads:
