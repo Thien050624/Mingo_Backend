@@ -1,5 +1,9 @@
 package com.mingo.backend.auth;
 
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdToken;
+import com.google.api.client.googleapis.auth.oauth2.GoogleIdTokenVerifier;
+import com.google.api.client.http.javanet.NetHttpTransport;
+import com.google.api.client.json.gson.GsonFactory;
 import com.mingo.backend.auth.dto.AuthResponse;
 import com.mingo.backend.auth.dto.LoginRequest;
 import com.mingo.backend.auth.dto.RefreshRequest;
@@ -11,6 +15,8 @@ import com.mingo.backend.common.security.JwtService;
 import com.mingo.backend.user.Role;
 import com.mingo.backend.user.User;
 import com.mingo.backend.user.UserRepository;
+import com.mingo.backend.user.UserStatus;
+import org.springframework.beans.factory.annotation.Value;
 import org.springframework.http.HttpStatus;
 import org.springframework.security.authentication.AuthenticationManager;
 import org.springframework.security.authentication.BadCredentialsException;
@@ -21,7 +27,11 @@ import org.springframework.security.crypto.password.PasswordEncoder;
 import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
+import java.security.GeneralSecurityException;
 import java.time.Duration;
+import java.util.Collections;
+import java.util.Optional;
+import java.util.UUID;
 
 @Service
 public class AuthService {
@@ -34,6 +44,7 @@ public class AuthService {
     private final CustomUserDetailsService userDetailsService;
     private final JwtService jwtService;
     private final RateLimiter rateLimiter;
+    private final GoogleIdTokenVerifier googleVerifier;
 
     public AuthService(
             UserRepository userRepository,
@@ -41,13 +52,17 @@ public class AuthService {
             AuthenticationManager authenticationManager,
             CustomUserDetailsService userDetailsService,
             JwtService jwtService,
-            RateLimiter rateLimiter) {
+            RateLimiter rateLimiter,
+            @Value("${app.google.client-id}") String googleClientId) {
         this.userRepository = userRepository;
         this.passwordEncoder = passwordEncoder;
         this.authenticationManager = authenticationManager;
         this.userDetailsService = userDetailsService;
         this.jwtService = jwtService;
         this.rateLimiter = rateLimiter;
+        this.googleVerifier = new GoogleIdTokenVerifier.Builder(new NetHttpTransport(), GsonFactory.getDefaultInstance())
+                .setAudience(Collections.singletonList(googleClientId))
+                .build();
     }
 
     @Transactional
@@ -66,6 +81,47 @@ public class AuthService {
                 .onboarded(false)
                 .build();
         userRepository.save(user);
+
+        return buildAuthResponse(user);
+    }
+
+    @Transactional
+    public AuthResponse loginWithGoogle(String idToken, String clientIp) {
+        rateLimiter.checkAllowed("google-login:" + clientIp, MAX_ATTEMPTS_PER_MINUTE, Duration.ofMinutes(1));
+
+        GoogleIdToken token;
+        try {
+            token = googleVerifier.verify(idToken);
+        } catch (GeneralSecurityException | java.io.IOException | IllegalArgumentException e) {
+            token = null;
+        }
+        if (token == null) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Token Google không hợp lệ");
+        }
+
+        GoogleIdToken.Payload payload = token.getPayload();
+        if (!Boolean.TRUE.equals(payload.getEmailVerified())) {
+            throw new ApiException(HttpStatus.UNAUTHORIZED, "Email Google chưa được xác minh");
+        }
+        String normalizedEmail = payload.getEmail().trim().toLowerCase();
+
+        Optional<User> existing = userRepository.findByEmail(normalizedEmail);
+        User user = existing.orElseGet(() -> {
+            // No password is ever set for a Google-only account; a random hash keeps the
+            // (non-null) column satisfied while making password login naturally impossible.
+            User created = User.builder()
+                    .email(normalizedEmail)
+                    .passwordHash(passwordEncoder.encode(UUID.randomUUID().toString()))
+                    .role(Role.USER)
+                    .onboarded(false)
+                    .build();
+            userRepository.save(created);
+            return created;
+        });
+
+        if (user.getStatus() == UserStatus.BANNED) {
+            throw new ApiException(HttpStatus.FORBIDDEN, "Tài khoản của bạn đã bị khoá");
+        }
 
         return buildAuthResponse(user);
     }

@@ -48,7 +48,7 @@ class AuthServiceTest {
     @BeforeEach
     void setUp() {
         authService = new AuthService(userRepository, passwordEncoder, authenticationManager, userDetailsService,
-                jwtService, new RateLimiter());
+                jwtService, new RateLimiter(), "test-google-client-id");
     }
 
     private UserDetails fakeUserDetails(String email) {

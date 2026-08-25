@@ -1,6 +1,7 @@
 package com.mingo.backend.auth;
 
 import com.mingo.backend.auth.dto.AuthResponse;
+import com.mingo.backend.auth.dto.GoogleLoginRequest;
 import com.mingo.backend.auth.dto.LoginRequest;
 import com.mingo.backend.auth.dto.RefreshRequest;
 import com.mingo.backend.auth.dto.RegisterRequest;
@@ -28,6 +29,11 @@ public class AuthController {
     @PostMapping("/login")
     public ResponseEntity<AuthResponse> login(@Valid @RequestBody LoginRequest request, HttpServletRequest httpRequest) {
         return ResponseEntity.ok(authService.login(request, clientIp(httpRequest)));
+    }
+
+    @PostMapping("/google")
+    public ResponseEntity<AuthResponse> loginWithGoogle(@Valid @RequestBody GoogleLoginRequest request, HttpServletRequest httpRequest) {
+        return ResponseEntity.ok(authService.loginWithGoogle(request.idToken(), clientIp(httpRequest)));
     }
 
     @PostMapping("/refresh")
