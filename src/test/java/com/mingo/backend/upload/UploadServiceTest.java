@@ -2,6 +2,7 @@ package com.mingo.backend.upload;
 
 import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.upload.dto.UploadResponse;
+import com.mingo.backend.upload.storage.LocalDiskUploadStorage;
 import org.junit.jupiter.api.BeforeEach;
 import org.junit.jupiter.api.Test;
 import org.junit.jupiter.api.io.TempDir;
@@ -18,7 +19,7 @@ class UploadServiceTest {
 
     @BeforeEach
     void setUp(@TempDir Path tempDir) {
-        uploadService = new UploadService(tempDir.toString(), "http://localhost:8080");
+        uploadService = new UploadService(new LocalDiskUploadStorage(tempDir.toString(), "http://localhost:8080"));
     }
 
     @Test

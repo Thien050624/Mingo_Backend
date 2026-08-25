@@ -1,4 +1,7 @@
 server:
+  # Render (and most PaaS hosts) assign the port dynamically via $PORT and route traffic
+  # there — the app must bind to it instead of a hardcoded port.
+  port: ${PORT:8080}
   # NIO2 avoids java.nio.channels.Selector's AF_UNIX-based wakeup pipe, which is broken
   # on this machine's network stack (regular TCP loopback works fine, AF_UNIX does not).
   protocol: org.apache.coyote.http11.Http11Nio2Protocol
@@ -39,6 +42,8 @@ app:
   upload:
     dir: ${UPLOAD_DIR:/app/uploads}
     base-url: ${UPLOAD_BASE_URL:http://localhost:8080}
+    # Set R2_BUCKET (and the other R2_* vars) in production to switch storage from local disk
+    # to Cloudflare R2 — see UploadStorageConfig. Leave unset for local docker-compose dev.
 
 springdoc:
   swagger-ui:

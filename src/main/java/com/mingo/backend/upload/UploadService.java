@@ -2,15 +2,13 @@ package com.mingo.backend.upload;
 
 import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.upload.dto.UploadResponse;
-import org.springframework.beans.factory.annotation.Value;
+import com.mingo.backend.upload.storage.UploadStorage;
 import org.springframework.http.HttpStatus;
 import org.springframework.stereotype.Service;
 import org.springframework.web.multipart.MultipartFile;
 
 import java.io.IOException;
 import java.nio.charset.StandardCharsets;
-import java.nio.file.Files;
-import java.nio.file.Path;
 import java.util.Map;
 import java.util.UUID;
 import java.util.function.Predicate;
@@ -66,17 +64,10 @@ public class UploadService {
             Map.entry("application/x-rar-compressed", bytes -> startsWith(bytes, 'R', 'a', 'r', '!'))
     );
 
-    private final Path uploadDir;
-    private final String baseUrl;
+    private final UploadStorage storage;
 
-    public UploadService(@Value("${app.upload.dir}") String dir, @Value("${app.upload.base-url}") String baseUrl) {
-        this.uploadDir = Path.of(dir);
-        this.baseUrl = baseUrl.endsWith("/") ? baseUrl.substring(0, baseUrl.length() - 1) : baseUrl;
-        try {
-            Files.createDirectories(this.uploadDir);
-        } catch (IOException e) {
-            throw new IllegalStateException("Không thể tạo thư mục lưu tệp: " + this.uploadDir, e);
-        }
+    public UploadService(UploadStorage storage) {
+        this.storage = storage;
     }
 
     public UploadResponse store(MultipartFile file) {
@@ -104,19 +95,14 @@ public class UploadService {
         }
 
         String filename = UUID.randomUUID() + extension;
-        Path target = uploadDir.resolve(filename);
-        try {
-            Files.write(target, content);
-        } catch (IOException e) {
-            throw new ApiException(HttpStatus.INTERNAL_SERVER_ERROR, "Không thể lưu tệp, vui lòng thử lại");
-        }
+        String url = storage.store(content, filename, contentType);
 
         String originalName = file.getOriginalFilename();
         if (originalName == null || originalName.isBlank()) {
             originalName = filename;
         }
 
-        return new UploadResponse(baseUrl + "/uploads/" + filename, originalName, contentType, file.getSize());
+        return new UploadResponse(url, originalName, contentType, file.getSize());
     }
 
     private boolean matchesDeclaredType(String contentType, byte[] content) {
