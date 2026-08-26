@@ -7,6 +7,8 @@ import java.util.UUID;
 
 public record AdminForumMessageResponse(
         UUID id,
+        UUID roomId,
+        String roomName,
         ParticipantSummary author,
         String content,
         Instant createdAt,

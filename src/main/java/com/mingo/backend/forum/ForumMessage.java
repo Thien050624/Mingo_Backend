@@ -16,6 +16,10 @@ public class ForumMessage {
     private UUID id;
 
     @ManyToOne(fetch = FetchType.LAZY)
+    @JoinColumn(name = "room_id", nullable = false)
+    private ForumRoom room;
+
+    @ManyToOne(fetch = FetchType.LAZY)
     @JoinColumn(name = "sender_id", nullable = false)
     private User sender;
 
@@ -49,6 +53,14 @@ public class ForumMessage {
 
     public UUID getId() {
         return id;
+    }
+
+    public ForumRoom getRoom() {
+        return room;
+    }
+
+    public void setRoom(ForumRoom room) {
+        this.room = room;
     }
 
     public User getSender() {

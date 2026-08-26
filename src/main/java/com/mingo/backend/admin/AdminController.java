@@ -87,9 +87,9 @@ public class AdminController {
         return ResponseEntity.noContent().build();
     }
 
-    @DeleteMapping("/forum/messages")
-    public ResponseEntity<Void> clearForumMessages(Authentication auth) {
-        adminService.clearForumMessages(auth.getName());
+    @DeleteMapping("/forum/rooms/{roomId}/messages")
+    public ResponseEntity<Void> clearForumMessages(Authentication auth, @PathVariable UUID roomId) {
+        adminService.clearForumMessages(auth.getName(), roomId);
         return ResponseEntity.noContent().build();
     }
 

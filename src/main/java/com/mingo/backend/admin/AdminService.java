@@ -193,6 +193,8 @@ public class AdminService {
         return forumMessageRepository.findReportedOrderByCreatedAtDesc(pageable)
                 .map(m -> new AdminForumMessageResponse(
                         m.getId(),
+                        m.getRoom().getId(),
+                        m.getRoom().getName(),
                         ParticipantSummary.from(m.getSender()),
                         m.isRecalled() ? null : m.getText(),
                         m.getCreatedAt(),
@@ -207,9 +209,9 @@ public class AdminService {
     }
 
     @Transactional
-    public void clearForumMessages(String adminEmail) {
-        forumService.clearAllMessages();
-        logAction(adminEmail, AdminAction.CLEAR_FORUM_MESSAGES, "FORUM_MESSAGE", null, null);
+    public void clearForumMessages(String adminEmail, UUID roomId) {
+        forumService.clearRoomMessages(roomId);
+        logAction(adminEmail, AdminAction.CLEAR_FORUM_MESSAGES, "FORUM_ROOM", roomId, null);
     }
 
     @Transactional

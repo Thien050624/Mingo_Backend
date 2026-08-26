@@ -216,13 +216,15 @@ class AdminServiceTest {
     }
 
     @Test
-    void clearForumMessages_delegatesToForumService_andLogsActionWithNoTargetId() {
-        adminService.clearForumMessages("admin@example.com");
+    void clearForumMessages_delegatesToForumService_andLogsActionWithRoomIdAsTarget() {
+        UUID roomId = UUID.randomUUID();
 
-        verify(forumService).clearAllMessages();
+        adminService.clearForumMessages("admin@example.com", roomId);
+
+        verify(forumService).clearRoomMessages(roomId);
         AdminAuditLog log = captureSavedLog();
         assertThat(log.getAction()).isEqualTo(AdminAction.CLEAR_FORUM_MESSAGES);
-        assertThat(log.getTargetId()).isNull();
+        assertThat(log.getTargetId()).isEqualTo(roomId);
     }
 
     @Test

@@ -14,7 +14,6 @@ import org.springframework.http.HttpStatus;
 import org.springframework.messaging.simp.SimpMessagingTemplate;
 import org.springframework.test.util.ReflectionTestUtils;
 
-import java.util.List;
 import java.util.Optional;
 import java.util.UUID;
 
@@ -27,6 +26,7 @@ import static org.mockito.Mockito.*;
 @ExtendWith(MockitoExtension.class)
 class ForumServiceTest {
 
+    @Mock private ForumRoomRepository roomRepository;
     @Mock private ForumMessageRepository messageRepository;
     @Mock private ForumMessageReportRepository reportRepository;
     @Mock private ForumMessageLikeRepository likeRepository;
@@ -36,22 +36,33 @@ class ForumServiceTest {
     private ForumService forumService;
 
     private User sender;
-    private User other;
+    private ForumRoom room;
+    private UUID roomId;
     private ForumMessage message;
     private UUID messageId;
 
     @BeforeEach
     void setUp() {
-        forumService = new ForumService(messageRepository, reportRepository, likeRepository, userRepository, messagingTemplate);
+        forumService = new ForumService(roomRepository, messageRepository, reportRepository, likeRepository,
+                userRepository, messagingTemplate);
 
         sender = User.builder().id(UUID.randomUUID()).email("sender@example.com").role(Role.USER).build();
-        other = User.builder().id(UUID.randomUUID()).email("other@example.com").role(Role.USER).build();
+
+        roomId = UUID.randomUUID();
+        room = new ForumRoom();
+        ReflectionTestUtils.setField(room, "id", roomId);
+        room.setName("Test Room");
 
         messageId = UUID.randomUUID();
         message = new ForumMessage();
         ReflectionTestUtils.setField(message, "id", messageId);
+        message.setRoom(room);
         message.setSender(sender);
         message.setText("hello everyone");
+    }
+
+    private String updatesTopic() {
+        return "/topic/forum-rooms/" + roomId + "/updates";
     }
 
     @Test
@@ -66,15 +77,13 @@ class ForumServiceTest {
     }
 
     @Test
-    void adminRecallMessage_marksRecalled_broadcastsToAllUsers_andDeletesReports() {
+    void adminRecallMessage_marksRecalled_broadcastsToRoomTopic_andDeletesReports() {
         when(messageRepository.findById(messageId)).thenReturn(Optional.of(message));
-        when(userRepository.findAll()).thenReturn(List.of(sender, other));
 
         forumService.adminRecallMessage(messageId);
 
         assertThat(message.isRecalled()).isTrue();
-        verify(messagingTemplate).convertAndSendToUser(eq("sender@example.com"), eq("/queue/forum-updates"), any(ForumMessageUpdateEvent.class));
-        verify(messagingTemplate).convertAndSendToUser(eq("other@example.com"), eq("/queue/forum-updates"), any(ForumMessageUpdateEvent.class));
+        verify(messagingTemplate).convertAndSend(eq(updatesTopic()), any(ForumMessageUpdateEvent.class));
         verify(reportRepository).deleteByMessageId(messageId);
     }
 
@@ -85,20 +94,29 @@ class ForumServiceTest {
 
         forumService.adminRecallMessage(messageId);
 
-        verify(messagingTemplate, never()).convertAndSendToUser(any(), any(), any());
+        verify(messagingTemplate, never()).convertAndSend(any(String.class), any(Object.class));
         verify(reportRepository).deleteByMessageId(messageId);
-        verify(userRepository, never()).findAll();
     }
 
     @Test
-    void clearAllMessages_deletesAllInBatch_andBroadcastsToEveryUser() {
-        when(userRepository.findAll()).thenReturn(List.of(sender, other));
+    void clearRoomMessages_deletesByRoomId_andBroadcastsToRoomTopic() {
+        when(roomRepository.findById(roomId)).thenReturn(Optional.of(room));
 
-        forumService.clearAllMessages();
+        forumService.clearRoomMessages(roomId);
 
-        verify(messageRepository).deleteAllInBatch();
-        verify(messagingTemplate).convertAndSendToUser(eq("sender@example.com"), eq("/queue/forum-cleared"), any());
-        verify(messagingTemplate).convertAndSendToUser(eq("other@example.com"), eq("/queue/forum-cleared"), any());
+        verify(messageRepository).deleteByRoomId(roomId);
+        verify(messagingTemplate).convertAndSend(eq("/topic/forum-rooms/" + roomId + "/cleared"), any(Object.class));
+    }
+
+    @Test
+    void clearRoomMessages_throwsNotFound_whenRoomDoesNotExist() {
+        when(roomRepository.findById(roomId)).thenReturn(Optional.empty());
+
+        assertThatThrownBy(() -> forumService.clearRoomMessages(roomId))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("status", HttpStatus.NOT_FOUND);
+
+        verify(messageRepository, never()).deleteByRoomId(any());
     }
 
     @Test
@@ -111,22 +129,19 @@ class ForumServiceTest {
     }
 
     @Test
-    void setMessageHidden_setsHiddenTrue_andBroadcastsUpdateToEveryUser() {
+    void setMessageHidden_setsHiddenTrue_andBroadcastsUpdateToRoomTopic() {
         when(messageRepository.findById(messageId)).thenReturn(Optional.of(message));
-        when(userRepository.findAll()).thenReturn(List.of(sender, other));
 
         forumService.setMessageHidden(messageId, true);
 
         assertThat(message.isHidden()).isTrue();
-        verify(messagingTemplate).convertAndSendToUser(eq("sender@example.com"), eq("/queue/forum-updates"), any(ForumMessageUpdateEvent.class));
-        verify(messagingTemplate).convertAndSendToUser(eq("other@example.com"), eq("/queue/forum-updates"), any(ForumMessageUpdateEvent.class));
+        verify(messagingTemplate).convertAndSend(eq(updatesTopic()), any(ForumMessageUpdateEvent.class));
     }
 
     @Test
     void setMessageHidden_setsHiddenFalse_whenUnhiding() {
         message.setHidden(true);
         when(messageRepository.findById(messageId)).thenReturn(Optional.of(message));
-        when(userRepository.findAll()).thenReturn(List.of());
 
         forumService.setMessageHidden(messageId, false);
 

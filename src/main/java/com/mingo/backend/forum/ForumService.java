@@ -5,6 +5,7 @@ import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.forum.dto.ForumMessageLikeEvent;
 import com.mingo.backend.forum.dto.ForumMessageResponse;
 import com.mingo.backend.forum.dto.ForumMessageUpdateEvent;
+import com.mingo.backend.forum.dto.ForumRoomResponse;
 import com.mingo.backend.user.User;
 import com.mingo.backend.user.UserRepository;
 import org.springframework.data.domain.Page;
@@ -23,17 +24,20 @@ import java.util.UUID;
 @Service
 public class ForumService {
 
+    private final ForumRoomRepository roomRepository;
     private final ForumMessageRepository messageRepository;
     private final ForumMessageReportRepository reportRepository;
     private final ForumMessageLikeRepository likeRepository;
     private final UserRepository userRepository;
     private final SimpMessagingTemplate messagingTemplate;
 
-    public ForumService(ForumMessageRepository messageRepository,
+    public ForumService(ForumRoomRepository roomRepository,
+                         ForumMessageRepository messageRepository,
                          ForumMessageReportRepository reportRepository,
                          ForumMessageLikeRepository likeRepository,
                          UserRepository userRepository,
                          SimpMessagingTemplate messagingTemplate) {
+        this.roomRepository = roomRepository;
         this.messageRepository = messageRepository;
         this.reportRepository = reportRepository;
         this.likeRepository = likeRepository;
@@ -42,42 +46,68 @@ public class ForumService {
     }
 
     @Transactional(readOnly = true)
-    public Page<ForumMessageResponse> listMessages(String email, int page, int size) {
+    public List<ForumRoomResponse> listRooms() {
+        return roomRepository.findAllByOrderByCreatedAtDesc().stream()
+                .map(ForumRoomResponse::from)
+                .toList();
+    }
+
+    @Transactional
+    public ForumRoomResponse createRoom(String email, String name, String description) {
         User me = findUser(email);
+        ForumRoom room = new ForumRoom();
+        room.setName(name.trim());
+        room.setDescription(StringUtils.hasText(description) ? description.trim() : null);
+        room.setCreatedBy(me);
+        roomRepository.saveAndFlush(room);
+        return ForumRoomResponse.from(room);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<ForumMessageResponse> listMessages(String email, UUID roomId, int page, int size) {
+        User me = findUser(email);
+        findRoom(roomId);
         Pageable pageable = PageRequest.of(page, size);
-        return messageRepository.findByHiddenFalseOrderByCreatedAtDesc(pageable)
+        return messageRepository.findByRoomIdAndHiddenFalseOrderByCreatedAtDesc(roomId, pageable)
                 .map(m -> toResponse(m, me.getId()));
     }
 
     @Transactional(readOnly = true)
-    public Page<ForumMessageResponse> searchMessages(String email, String query, int page, int size) {
+    public Page<ForumMessageResponse> searchMessages(String email, UUID roomId, String query, int page, int size) {
         User me = findUser(email);
+        findRoom(roomId);
         if (!StringUtils.hasText(query)) {
             return Page.empty();
         }
         Pageable pageable = PageRequest.of(page, size);
-        return messageRepository.findByHiddenFalseAndRecalledFalseAndTextContainingIgnoreCaseOrderByCreatedAtDesc(query, pageable)
+        return messageRepository.findByRoomIdAndHiddenFalseAndRecalledFalseAndTextContainingIgnoreCaseOrderByCreatedAtDesc(
+                        roomId, query, pageable)
                 .map(m -> toResponse(m, me.getId()));
     }
 
     @Transactional(readOnly = true)
-    public int locateMessagePage(String email, UUID messageId, int size) {
+    public int locateMessagePage(String email, UUID roomId, UUID messageId, int size) {
         findUser(email);
         ForumMessage target = messageRepository.findById(messageId)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy tin nhắn"));
-        long newerCount = messageRepository.countByCreatedAtAfter(target.getCreatedAt());
+        if (!target.getRoom().getId().equals(roomId)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Tin nhắn không thuộc phòng này");
+        }
+        long newerCount = messageRepository.countByRoomIdAndCreatedAtAfter(roomId, target.getCreatedAt());
         return (int) (newerCount / size);
     }
 
     @Transactional
-    public ForumMessageResponse sendMessage(String email, String text, String imageUrl,
+    public ForumMessageResponse sendMessage(String email, UUID roomId, String text, String imageUrl,
                                              String fileUrl, String fileName, Long fileSize, String fileType) {
         User me = findUser(email);
+        ForumRoom room = findRoom(roomId);
         if (!StringUtils.hasText(text) && !StringUtils.hasText(imageUrl) && !StringUtils.hasText(fileUrl)) {
             throw new ApiException(HttpStatus.BAD_REQUEST, "Tin nhắn không được để trống");
         }
 
         ForumMessage message = new ForumMessage();
+        message.setRoom(room);
         message.setSender(me);
         message.setText(text);
         message.setImageUrl(imageUrl);
@@ -88,9 +118,7 @@ public class ForumService {
         messageRepository.saveAndFlush(message);
 
         ForumMessageResponse response = toResponse(message, me.getId());
-        userRepository.findAll().stream()
-                .filter(u -> !u.getId().equals(me.getId()))
-                .forEach(u -> messagingTemplate.convertAndSendToUser(u.getEmail(), "/queue/forum-messages", response));
+        messagingTemplate.convertAndSend(roomTopic(roomId, "messages"), response);
 
         return response;
     }
@@ -116,9 +144,7 @@ public class ForumService {
                 .toList();
 
         ForumMessageLikeEvent event = new ForumMessageLikeEvent(messageId, likedBy);
-        userRepository.findAll().stream()
-                .filter(u -> !u.getId().equals(me.getId()))
-                .forEach(u -> messagingTemplate.convertAndSendToUser(u.getEmail(), "/queue/forum-likes", event));
+        messagingTemplate.convertAndSend(roomTopic(message.getRoom().getId(), "likes"), event);
 
         return toResponse(message, me.getId());
     }
@@ -139,9 +165,7 @@ public class ForumService {
         message.setRecalled(true);
 
         ForumMessageUpdateEvent event = new ForumMessageUpdateEvent(messageId, true, message.isHidden());
-        userRepository.findAll().stream()
-                .filter(u -> !u.getId().equals(me.getId()))
-                .forEach(u -> messagingTemplate.convertAndSendToUser(u.getEmail(), "/queue/forum-updates", event));
+        messagingTemplate.convertAndSend(roomTopic(message.getRoom().getId(), "updates"), event);
     }
 
     @Transactional
@@ -152,17 +176,16 @@ public class ForumService {
             message.setRecalled(true);
 
             ForumMessageUpdateEvent event = new ForumMessageUpdateEvent(messageId, true, message.isHidden());
-            userRepository.findAll()
-                    .forEach(u -> messagingTemplate.convertAndSendToUser(u.getEmail(), "/queue/forum-updates", event));
+            messagingTemplate.convertAndSend(roomTopic(message.getRoom().getId(), "updates"), event);
         }
         reportRepository.deleteByMessageId(messageId);
     }
 
     @Transactional
-    public void clearAllMessages() {
-        messageRepository.deleteAllInBatch();
-        userRepository.findAll()
-                .forEach(u -> messagingTemplate.convertAndSendToUser(u.getEmail(), "/queue/forum-cleared", java.util.Map.of()));
+    public void clearRoomMessages(UUID roomId) {
+        findRoom(roomId);
+        messageRepository.deleteByRoomId(roomId);
+        messagingTemplate.convertAndSend(roomTopic(roomId, "cleared"), java.util.Map.of());
     }
 
     @Transactional
@@ -172,8 +195,7 @@ public class ForumService {
         message.setHidden(hidden);
 
         ForumMessageUpdateEvent event = new ForumMessageUpdateEvent(messageId, message.isRecalled(), hidden);
-        userRepository.findAll()
-                .forEach(u -> messagingTemplate.convertAndSendToUser(u.getEmail(), "/queue/forum-updates", event));
+        messagingTemplate.convertAndSend(roomTopic(message.getRoom().getId(), "updates"), event);
     }
 
     @Transactional
@@ -199,12 +221,21 @@ public class ForumService {
         reportRepository.deleteByMessageIdAndReporterId(messageId, me.getId());
     }
 
+    private String roomTopic(UUID roomId, String suffix) {
+        return "/topic/forum-rooms/" + roomId + "/" + suffix;
+    }
+
     private ForumMessageResponse toResponse(ForumMessage message, UUID viewerId) {
         boolean reportedByMe = reportRepository.existsByMessageIdAndReporterId(message.getId(), viewerId);
         List<ParticipantSummary> likedBy = likeRepository.findByMessageId(message.getId()).stream()
                 .map(l -> ParticipantSummary.from(l.getUser()))
                 .toList();
         return ForumMessageResponse.from(message, likedBy, reportedByMe);
+    }
+
+    private ForumRoom findRoom(UUID roomId) {
+        return roomRepository.findById(roomId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy phòng"));
     }
 
     private User findUser(String email) {
