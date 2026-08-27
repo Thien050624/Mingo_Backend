@@ -339,10 +339,10 @@ public class PostService {
     }
 
     private void assertVisible(Post post, UUID viewerId) {
-        if (post.getAuthor().getId().equals(viewerId)) return;
         if (post.isHidden()) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy bài viết");
         }
+        if (post.getAuthor().getId().equals(viewerId)) return;
         if (userBlockRepository.existsEitherWay(post.getAuthor().getId(), viewerId)) {
             throw new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy bài viết");
         }

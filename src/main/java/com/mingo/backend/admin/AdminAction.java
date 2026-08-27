@@ -4,6 +4,8 @@ public enum AdminAction {
     BAN_USER,
     UNBAN_USER,
     DELETE_USER,
+    GRANT_ADMIN,
+    REVOKE_ADMIN,
     HIDE_POST,
     UNHIDE_POST,
     DELETE_POST,

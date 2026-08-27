@@ -11,7 +11,7 @@ import java.util.UUID;
 
 public interface PostRepository extends JpaRepository<Post, UUID> {
 
-    @Query("SELECT p FROM Post p JOIN FETCH p.author WHERE (p.hidden = false OR p.author.id = :viewerId) " +
+    @Query("SELECT p FROM Post p JOIN FETCH p.author WHERE p.hidden = false " +
             "AND (p.visibility = :publicVisibility OR p.author.id = :viewerId OR " +
             "(p.visibility = 'FRIENDS' AND EXISTS (SELECT f FROM Friendship f WHERE f.status = 'ACCEPTED' " +
             "AND ((f.requester.id = p.author.id AND f.addressee.id = :viewerId) " +
@@ -25,7 +25,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
                                  Pageable pageable);
 
     @Query("SELECT p FROM Post p JOIN FETCH p.author WHERE p.author.id = :authorId " +
-            "AND (p.hidden = false OR p.author.id = :viewerId) " +
+            "AND p.hidden = false " +
             "AND (p.visibility = :publicVisibility OR p.author.id = :viewerId OR " +
             "(p.visibility = 'FRIENDS' AND EXISTS (SELECT f FROM Friendship f WHERE f.status = 'ACCEPTED' " +
             "AND ((f.requester.id = p.author.id AND f.addressee.id = :viewerId) " +
@@ -42,7 +42,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     long countByAuthorId(UUID authorId);
 
     @Query("SELECT COUNT(p) FROM Post p WHERE p.author.id = :authorId " +
-            "AND (p.hidden = false OR p.author.id = :viewerId) " +
+            "AND p.hidden = false " +
             "AND (p.visibility = :publicVisibility OR p.author.id = :viewerId OR " +
             "(p.visibility = 'FRIENDS' AND EXISTS (SELECT f FROM Friendship f WHERE f.status = 'ACCEPTED' " +
             "AND ((f.requester.id = p.author.id AND f.addressee.id = :viewerId) " +
@@ -62,7 +62,7 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
     @Query("SELECT DISTINCT p FROM Post p WHERE p.id IN (SELECT r.post.id FROM PostReport r) ORDER BY p.createdAt DESC")
     Page<Post> findReportedOrderByCreatedAtDesc(Pageable pageable);
 
-    @Query("SELECT p FROM Post p JOIN FETCH p.author WHERE (p.hidden = false OR p.author.id = :viewerId) " +
+    @Query("SELECT p FROM Post p JOIN FETCH p.author WHERE p.hidden = false " +
             "AND (p.visibility = :publicVisibility OR p.author.id = :viewerId OR " +
             "(p.visibility = 'FRIENDS' AND EXISTS (SELECT f FROM Friendship f WHERE f.status = 'ACCEPTED' " +
             "AND ((f.requester.id = p.author.id AND f.addressee.id = :viewerId) " +

@@ -77,7 +77,7 @@ class AdminControllerTest {
     @Test
     @WithMockUser(roles = "ADMIN")
     void listUsers_returns200_whenAuthenticatedAsAdmin() throws Exception {
-        when(adminService.listUsers(any(), any())).thenReturn(Page.empty());
+        when(adminService.listUsers(any(), any(), any())).thenReturn(Page.empty());
 
         mockMvc.perform(get("/admin/users"))
                 .andExpect(status().isOk());

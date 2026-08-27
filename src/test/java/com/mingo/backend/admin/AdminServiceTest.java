@@ -7,6 +7,8 @@ import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.forum.ForumMessageReportRepository;
 import com.mingo.backend.forum.ForumMessageRepository;
 import com.mingo.backend.forum.ForumService;
+import com.mingo.backend.notification.NotificationService;
+import com.mingo.backend.notification.NotificationType;
 import com.mingo.backend.post.CommentRepository;
 import com.mingo.backend.post.CommentReportRepository;
 import com.mingo.backend.post.Post;
@@ -54,6 +56,7 @@ class AdminServiceTest {
     @Mock private MessageReportRepository messageReportRepository;
     @Mock private ChatService chatService;
     @Mock private AdminAuditLogRepository auditLogRepository;
+    @Mock private NotificationService notificationService;
 
     private AdminService adminService;
 
@@ -64,7 +67,7 @@ class AdminServiceTest {
     void setUp() {
         adminService = new AdminService(userRepository, postRepository, postReportRepository, reactionRepository,
                 commentRepository, commentReportRepository, forumMessageRepository, forumMessageReportRepository, forumService,
-                messageRepository, messageReportRepository, chatService, auditLogRepository);
+                messageRepository, messageReportRepository, chatService, auditLogRepository, notificationService);
 
         admin = User.builder().id(UUID.randomUUID()).email("admin@example.com").role(Role.ADMIN).build();
         targetUser = User.builder().id(UUID.randomUUID()).email("target@example.com").role(Role.USER).build();
@@ -159,6 +162,7 @@ class AdminServiceTest {
         AdminAuditLog log = captureSavedLog();
         assertThat(log.getAction()).isEqualTo(AdminAction.HIDE_POST);
         assertThat(log.getTargetId()).isEqualTo(postId);
+        verify(notificationService).notify(targetUser, admin, NotificationType.POST_HIDDEN_BY_ADMIN, post, null);
     }
 
     @Test
@@ -177,12 +181,13 @@ class AdminServiceTest {
 
         assertThat(post.isHidden()).isFalse();
         assertThat(captureSavedLog().getAction()).isEqualTo(AdminAction.UNHIDE_POST);
+        verify(notificationService, never()).notify(any(), any(), any(), any(), any());
     }
 
     @Test
     void deletePost_throwsNotFound_whenPostMissing_andDoesNotLog() {
         UUID postId = UUID.randomUUID();
-        when(postRepository.existsById(postId)).thenReturn(false);
+        when(postRepository.findById(postId)).thenReturn(Optional.empty());
 
         assertThatThrownBy(() -> adminService.deletePost("admin@example.com", postId))
                 .isInstanceOf(ApiException.class)
@@ -190,12 +195,15 @@ class AdminServiceTest {
 
         verify(postRepository, never()).deleteById(any());
         verify(auditLogRepository, never()).save(any());
+        verify(notificationService, never()).notify(any(), any(), any(), any(), any());
     }
 
     @Test
-    void deletePost_deletesPost_andLogsDeleteAction() {
+    void deletePost_deletesPost_andLogsDeleteAction_andNotifiesAuthorWithoutPostReference() {
+        Post post = new Post();
+        post.setAuthor(targetUser);
         UUID postId = UUID.randomUUID();
-        when(postRepository.existsById(postId)).thenReturn(true);
+        when(postRepository.findById(postId)).thenReturn(Optional.of(post));
 
         adminService.deletePost("admin@example.com", postId);
 
@@ -203,6 +211,7 @@ class AdminServiceTest {
         AdminAuditLog log = captureSavedLog();
         assertThat(log.getAction()).isEqualTo(AdminAction.DELETE_POST);
         assertThat(log.getTargetId()).isEqualTo(postId);
+        verify(notificationService).notify(targetUser, admin, NotificationType.POST_DELETED_BY_ADMIN, null, null);
     }
 
     @Test
@@ -292,6 +301,70 @@ class AdminServiceTest {
                 adminService.listAuditLog(null, null, null, null, PageRequest.of(0, 30));
 
         assertThat(result.getContent()).isEmpty();
+    }
+
+    @Test
+    void setUserRole_grantsAdmin_andLogsGrantAction() {
+        when(userRepository.findById(targetUser.getId())).thenReturn(Optional.of(targetUser));
+
+        adminService.setUserRole("admin@example.com", targetUser.getId(), "ADMIN");
+
+        assertThat(targetUser.getRole()).isEqualTo(Role.ADMIN);
+        AdminAuditLog log = captureSavedLog();
+        assertThat(log.getAction()).isEqualTo(AdminAction.GRANT_ADMIN);
+        assertThat(log.getTargetId()).isEqualTo(targetUser.getId());
+        assertThat(log.getDetails()).isEqualTo("target@example.com");
+    }
+
+    @Test
+    void setUserRole_revokesAdmin_andLogsRevokeAction_whenMoreThanOneAdminRemains() {
+        targetUser.setRole(Role.ADMIN);
+        when(userRepository.findById(targetUser.getId())).thenReturn(Optional.of(targetUser));
+        when(userRepository.countByRole(Role.ADMIN)).thenReturn(2L);
+
+        adminService.setUserRole("admin@example.com", targetUser.getId(), "USER");
+
+        assertThat(targetUser.getRole()).isEqualTo(Role.USER);
+        assertThat(captureSavedLog().getAction()).isEqualTo(AdminAction.REVOKE_ADMIN);
+    }
+
+    @Test
+    void setUserRole_throwsBadRequest_whenRevokingTheLastAdmin() {
+        targetUser.setRole(Role.ADMIN);
+        when(userRepository.findById(targetUser.getId())).thenReturn(Optional.of(targetUser));
+        when(userRepository.countByRole(Role.ADMIN)).thenReturn(1L);
+
+        assertThatThrownBy(() -> adminService.setUserRole("admin@example.com", targetUser.getId(), "USER"))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.BAD_REQUEST);
+
+        assertThat(targetUser.getRole()).isEqualTo(Role.ADMIN);
+        verify(userRepository, never()).save(any());
+        verify(auditLogRepository, never()).save(any());
+    }
+
+    @Test
+    void setUserRole_throwsBadRequest_whenAdminTargetsSelf() {
+        when(userRepository.findById(admin.getId())).thenReturn(Optional.of(admin));
+
+        assertThatThrownBy(() -> adminService.setUserRole("admin@example.com", admin.getId(), "USER"))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.BAD_REQUEST);
+
+        verify(userRepository, never()).save(any());
+        verify(auditLogRepository, never()).save(any());
+    }
+
+    @Test
+    void setUserRole_throwsBadRequest_whenRoleValueIsInvalid() {
+        when(userRepository.findById(targetUser.getId())).thenReturn(Optional.of(targetUser));
+
+        assertThatThrownBy(() -> adminService.setUserRole("admin@example.com", targetUser.getId(), "SUPERUSER"))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.BAD_REQUEST);
+
+        verify(userRepository, never()).save(any());
+        verify(auditLogRepository, never()).save(any());
     }
 
     @Test

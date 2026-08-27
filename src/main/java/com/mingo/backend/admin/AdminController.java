@@ -12,6 +12,8 @@ import com.mingo.backend.admin.dto.SetCommentHiddenRequest;
 import com.mingo.backend.admin.dto.SetForumMessageHiddenRequest;
 import com.mingo.backend.admin.dto.SetPostHiddenRequest;
 import com.mingo.backend.admin.dto.SetUserBannedRequest;
+import com.mingo.backend.admin.dto.SetUserRoleRequest;
+import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.data.domain.Sort;
@@ -46,13 +48,19 @@ public class AdminController {
 
     @GetMapping("/users")
     public Page<AdminUserResponse> listUsers(@RequestParam(required = false) String query,
+                                              @RequestParam(required = false) String role,
                                               @PageableDefault(size = 20) Pageable pageable) {
-        return adminService.listUsers(query, pageable);
+        return adminService.listUsers(query, role, pageable);
     }
 
     @PatchMapping("/users/{id}/status")
     public AdminUserResponse setUserBanned(Authentication auth, @PathVariable UUID id, @RequestBody SetUserBannedRequest request) {
         return adminService.setUserBanned(auth.getName(), id, request.banned());
+    }
+
+    @PatchMapping("/users/{id}/role")
+    public AdminUserResponse setUserRole(Authentication auth, @PathVariable UUID id, @Valid @RequestBody SetUserRoleRequest request) {
+        return adminService.setUserRole(auth.getName(), id, request.role());
     }
 
     @DeleteMapping("/users/{id}")

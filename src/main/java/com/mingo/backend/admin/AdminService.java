@@ -16,6 +16,8 @@ import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.forum.ForumMessageReportRepository;
 import com.mingo.backend.forum.ForumMessageRepository;
 import com.mingo.backend.forum.ForumService;
+import com.mingo.backend.notification.NotificationService;
+import com.mingo.backend.notification.NotificationType;
 import com.mingo.backend.post.Comment;
 import com.mingo.backend.post.CommentRepository;
 import com.mingo.backend.post.CommentReportRepository;
@@ -62,6 +64,7 @@ public class AdminService {
     private final MessageReportRepository messageReportRepository;
     private final ChatService chatService;
     private final AdminAuditLogRepository auditLogRepository;
+    private final NotificationService notificationService;
 
     public AdminService(UserRepository userRepository, PostRepository postRepository,
                          PostReportRepository postReportRepository, ReactionRepository reactionRepository,
@@ -69,7 +72,8 @@ public class AdminService {
                          ForumMessageRepository forumMessageRepository,
                          ForumMessageReportRepository forumMessageReportRepository, ForumService forumService,
                          MessageRepository messageRepository, MessageReportRepository messageReportRepository,
-                         ChatService chatService, AdminAuditLogRepository auditLogRepository) {
+                         ChatService chatService, AdminAuditLogRepository auditLogRepository,
+                         NotificationService notificationService) {
         this.userRepository = userRepository;
         this.postRepository = postRepository;
         this.postReportRepository = postReportRepository;
@@ -83,6 +87,7 @@ public class AdminService {
         this.messageReportRepository = messageReportRepository;
         this.chatService = chatService;
         this.auditLogRepository = auditLogRepository;
+        this.notificationService = notificationService;
     }
 
     @Transactional(readOnly = true)
@@ -123,11 +128,49 @@ public class AdminService {
     }
 
     @Transactional(readOnly = true)
-    public Page<AdminUserResponse> listUsers(String query, Pageable pageable) {
-        Page<User> page = StringUtils.hasText(query)
-                ? userRepository.searchUsers(query.trim(), pageable)
-                : userRepository.findAllByOrderByCreatedAtDesc(pageable);
+    public Page<AdminUserResponse> listUsers(String query, String role, Pageable pageable) {
+        Page<User> page;
+        if ("ADMIN".equalsIgnoreCase(role)) {
+            page = StringUtils.hasText(query)
+                    ? userRepository.searchUsersByRole(query.trim(), Role.ADMIN, pageable)
+                    : userRepository.findByRoleOrderByCreatedAtDesc(Role.ADMIN, pageable);
+        } else if ("USER".equalsIgnoreCase(role)) {
+            page = StringUtils.hasText(query)
+                    ? userRepository.searchUsersByRole(query.trim(), Role.USER, pageable)
+                    : userRepository.findByRoleOrderByCreatedAtDesc(Role.USER, pageable);
+        } else {
+            page = StringUtils.hasText(query)
+                    ? userRepository.searchUsers(query.trim(), pageable)
+                    : userRepository.findAllByOrderByCreatedAtDesc(pageable);
+        }
         return page.map(u -> AdminUserResponse.from(u, postRepository.countByAuthorId(u.getId())));
+    }
+
+    @Transactional
+    public AdminUserResponse setUserRole(String adminEmail, UUID userId, String roleValue) {
+        User admin = findAdmin(adminEmail);
+        User user = userRepository.findById(userId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy người dùng"));
+
+        Role role;
+        try {
+            role = Role.valueOf(roleValue);
+        } catch (IllegalArgumentException e) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Vai trò không hợp lệ");
+        }
+
+        if (admin.getId().equals(userId)) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Không thể tự thay đổi quyền của chính mình");
+        }
+        if (role == Role.USER && user.getRole() == Role.ADMIN && userRepository.countByRole(Role.ADMIN) <= 1) {
+            throw new ApiException(HttpStatus.BAD_REQUEST, "Không thể thu hồi quyền của quản trị viên cuối cùng");
+        }
+
+        user.setRole(role);
+        userRepository.save(user);
+        logAction(adminEmail, role == Role.ADMIN ? AdminAction.GRANT_ADMIN : AdminAction.REVOKE_ADMIN,
+                "USER", user.getId(), user.getEmail());
+        return AdminUserResponse.from(user, postRepository.countByAuthorId(user.getId()));
     }
 
     @Transactional
@@ -170,9 +213,8 @@ public class AdminService {
         long likes = reactionRepository.findByPostId(post.getId()).size();
         long comments = commentRepository.findByPostIdAndParentCommentIsNullOrderByCreatedAtAsc(post.getId()).size();
         long reports = postReportRepository.countByPostId(post.getId());
-        String image = post.getImages().isEmpty() ? null : post.getImages().get(0);
         return new AdminPostResponse(post.getId(), AuthorSummary.from(post.getAuthor()), post.getContent(),
-                image, post.getCreatedAt(), likes, comments, post.isHidden(), reports);
+                List.copyOf(post.getImages()), post.getCreatedAt(), likes, comments, post.isHidden(), reports);
     }
 
     @Transactional
@@ -182,15 +224,23 @@ public class AdminService {
         post.setHidden(hidden);
         postRepository.save(post);
         logAction(adminEmail, hidden ? AdminAction.HIDE_POST : AdminAction.UNHIDE_POST, "POST", postId, null);
+        if (hidden) {
+            User admin = findAdmin(adminEmail);
+            notificationService.notify(post.getAuthor(), admin, NotificationType.POST_HIDDEN_BY_ADMIN, post, null);
+        }
         return toAdminPostResponse(post);
     }
 
     @Transactional
     public void deletePost(String adminEmail, UUID postId) {
-        if (!postRepository.existsById(postId)) {
-            throw new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy bài viết");
-        }
+        Post post = postRepository.findById(postId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy bài viết"));
+        User admin = findAdmin(adminEmail);
+        User author = post.getAuthor();
         postRepository.deleteById(postId);
+        // Notify without a post reference: notifications.post_id cascades on post deletion,
+        // so keeping the link would delete this very notification the moment the post is gone.
+        notificationService.notify(author, admin, NotificationType.POST_DELETED_BY_ADMIN, null, null);
         logAction(adminEmail, AdminAction.DELETE_POST, "POST", postId, null);
     }
 
@@ -315,9 +365,13 @@ public class AdminService {
                 .toList();
     }
 
-    private void logAction(String adminEmail, AdminAction action, String targetType, UUID targetId, String details) {
-        User admin = userRepository.findByEmail(adminEmail)
+    private User findAdmin(String adminEmail) {
+        return userRepository.findByEmail(adminEmail)
                 .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy quản trị viên"));
+    }
+
+    private void logAction(String adminEmail, AdminAction action, String targetType, UUID targetId, String details) {
+        User admin = findAdmin(adminEmail);
         AdminAuditLog log = new AdminAuditLog();
         log.setAdmin(admin);
         log.setAction(action);

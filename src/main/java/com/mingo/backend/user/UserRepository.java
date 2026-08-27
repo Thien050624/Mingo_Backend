@@ -22,9 +22,17 @@ public interface UserRepository extends JpaRepository<User, UUID> {
 
     java.util.List<User> findByRoleOrderByEmailAsc(Role role);
 
+    Page<User> findByRoleOrderByCreatedAtDesc(Role role, Pageable pageable);
+
+    long countByRole(Role role);
+
     @Query("SELECT u FROM User u WHERE LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%')) " +
             "OR LOWER(u.displayName) LIKE LOWER(CONCAT('%', :query, '%')) ORDER BY u.createdAt DESC")
     Page<User> searchUsers(@Param("query") String query, Pageable pageable);
+
+    @Query("SELECT u FROM User u WHERE u.role = :role AND (LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%')) " +
+            "OR LOWER(u.displayName) LIKE LOWER(CONCAT('%', :query, '%'))) ORDER BY u.createdAt DESC")
+    Page<User> searchUsersByRole(@Param("query") String query, @Param("role") Role role, Pageable pageable);
 
     @Query("SELECT u FROM User u WHERE u.role <> com.mingo.backend.user.Role.ADMIN " +
             "AND (LOWER(u.email) LIKE LOWER(CONCAT('%', :query, '%')) " +

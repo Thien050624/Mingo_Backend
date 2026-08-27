@@ -143,4 +143,15 @@ class PostServiceTest {
                 .isInstanceOf(ApiException.class)
                 .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.NOT_FOUND);
     }
+
+    @Test
+    void getPost_throwsNotFound_whenPostIsHidden_evenForItsOwnAuthor() {
+        Post post = postWith(PostVisibility.PUBLIC);
+        post.setHidden(true);
+        when(userRepository.findByEmail("viewer@example.com")).thenReturn(Optional.of(author));
+
+        assertThatThrownBy(() -> postService.getPost("viewer@example.com", UUID.randomUUID()))
+                .isInstanceOf(ApiException.class)
+                .hasFieldOrPropertyWithValue("status", org.springframework.http.HttpStatus.NOT_FOUND);
+    }
 }
