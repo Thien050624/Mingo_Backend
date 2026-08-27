@@ -38,6 +38,7 @@ public class PostService {
     private final PostRepository postRepository;
     private final CommentRepository commentRepository;
     private final CommentLikeRepository commentLikeRepository;
+    private final CommentReportRepository commentReportRepository;
     private final ReactionRepository reactionRepository;
     private final PostReportRepository postReportRepository;
     private final SavedPostRepository savedPostRepository;
@@ -50,7 +51,8 @@ public class PostService {
     private static final int MAX_POSTS_PER_MINUTE = 5;
 
     public PostService(PostRepository postRepository, CommentRepository commentRepository,
-                        CommentLikeRepository commentLikeRepository, ReactionRepository reactionRepository,
+                        CommentLikeRepository commentLikeRepository, CommentReportRepository commentReportRepository,
+                        ReactionRepository reactionRepository,
                         PostReportRepository postReportRepository, SavedPostRepository savedPostRepository,
                         UserRepository userRepository, FriendshipRepository friendshipRepository,
                         UserBlockRepository userBlockRepository, NotificationService notificationService,
@@ -58,6 +60,7 @@ public class PostService {
         this.postRepository = postRepository;
         this.commentRepository = commentRepository;
         this.commentLikeRepository = commentLikeRepository;
+        this.commentReportRepository = commentReportRepository;
         this.reactionRepository = reactionRepository;
         this.postReportRepository = postReportRepository;
         this.savedPostRepository = savedPostRepository;
@@ -178,6 +181,11 @@ public class PostService {
                 throw new ApiException(HttpStatus.BAD_REQUEST, "Chỉ có thể phản hồi bình luận gốc");
             }
             comment.setParentComment(parent);
+        } else if (request.imageUrl() != null) {
+            if (!post.getImages().contains(request.imageUrl())) {
+                throw new ApiException(HttpStatus.BAD_REQUEST, "Ảnh không thuộc bài viết này");
+            }
+            comment.setImageUrl(request.imageUrl());
         }
 
         commentRepository.saveAndFlush(comment);
@@ -219,6 +227,29 @@ public class PostService {
 
         commentLikeRepository.deleteByCommentIdAndUserId(commentId, user.getId());
         return buildCommentResponse(comment, user.getId());
+    }
+
+    @Transactional
+    public void reportComment(String email, UUID postId, UUID commentId, String reason) {
+        User me = findUser(email);
+        Comment comment = findCommentOnPost(commentId, postId);
+
+        if (commentReportRepository.existsByCommentIdAndReporterId(commentId, me.getId())) {
+            return;
+        }
+
+        CommentReport report = new CommentReport();
+        report.setComment(comment);
+        report.setReporter(me);
+        report.setReason(reason);
+        commentReportRepository.save(report);
+    }
+
+    @Transactional
+    public void unreportComment(String email, UUID postId, UUID commentId) {
+        User me = findUser(email);
+        findCommentOnPost(commentId, postId);
+        commentReportRepository.deleteByCommentIdAndReporterId(commentId, me.getId());
     }
 
     @Transactional
@@ -333,7 +364,7 @@ public class PostService {
             if (r.getUser().getId().equals(viewerId)) myReaction = r.getType().name().toLowerCase();
         }
 
-        List<CommentResponse> comments = commentRepository.findByPostIdAndParentCommentIsNullOrderByCreatedAtAsc(post.getId())
+        List<CommentResponse> comments = commentRepository.findByPostIdAndParentCommentIsNullAndHiddenFalseOrderByCreatedAtAsc(post.getId())
                 .stream().map(c -> buildCommentResponse(c, viewerId)).collect(Collectors.toList());
 
         // Materialize into a plain list while the session is still open — passing the lazy
@@ -360,10 +391,11 @@ public class PostService {
     private CommentResponse buildCommentResponse(Comment comment, UUID viewerId) {
         long likeCount = commentLikeRepository.countByCommentId(comment.getId());
         boolean likedByMe = commentLikeRepository.findByCommentIdAndUserId(comment.getId(), viewerId).isPresent();
+        boolean reportedByMe = commentReportRepository.existsByCommentIdAndReporterId(comment.getId(), viewerId);
 
         // Replies never carry their own nested replies (one level of nesting only).
         List<CommentResponse> replies = comment.getParentComment() == null
-                ? commentRepository.findByParentCommentIdOrderByCreatedAtAsc(comment.getId())
+                ? commentRepository.findByParentCommentIdAndHiddenFalseOrderByCreatedAtAsc(comment.getId())
                         .stream().map(r -> buildCommentResponse(r, viewerId)).collect(Collectors.toList())
                 : List.of();
 
@@ -371,9 +403,11 @@ public class PostService {
                 comment.getId(),
                 AuthorSummary.from(comment.getAuthor()),
                 comment.getContent(),
+                comment.getImageUrl(),
                 comment.getCreatedAt(),
                 likeCount,
                 likedByMe,
+                reportedByMe,
                 replies);
     }
 
@@ -397,13 +431,13 @@ public class PostService {
         Map<UUID, List<Reaction>> reactionsByPost = reactionRepository.findByPostIdIn(postIds).stream()
                 .collect(Collectors.groupingBy(r -> r.getPost().getId()));
 
-        List<Comment> topLevelComments = commentRepository.findByPostIdInAndParentCommentIsNullOrderByCreatedAtAsc(postIds);
+        List<Comment> topLevelComments = commentRepository.findByPostIdInAndParentCommentIsNullAndHiddenFalseOrderByCreatedAtAsc(postIds);
         Map<UUID, List<Comment>> topLevelByPost = topLevelComments.stream()
                 .collect(Collectors.groupingBy(c -> c.getPost().getId()));
 
         List<UUID> topLevelIds = topLevelComments.stream().map(Comment::getId).toList();
         Map<UUID, List<Comment>> repliesByParent = topLevelIds.isEmpty() ? Map.of()
-                : commentRepository.findByParentCommentIdInOrderByCreatedAtAsc(topLevelIds).stream()
+                : commentRepository.findByParentCommentIdInAndHiddenFalseOrderByCreatedAtAsc(topLevelIds).stream()
                         .collect(Collectors.groupingBy(c -> c.getParentComment().getId()));
 
         List<UUID> allCommentIds = new ArrayList<>(topLevelIds);
@@ -416,6 +450,11 @@ public class PostService {
         Set<UUID> likedByMeCommentIds = allCommentIds.isEmpty() ? Set.of()
                 : commentLikeRepository.findByCommentIdInAndUserId(allCommentIds, viewerId).stream()
                         .map(cl -> cl.getComment().getId())
+                        .collect(Collectors.toSet());
+
+        Set<UUID> reportedByMeCommentIds = allCommentIds.isEmpty() ? Set.of()
+                : commentReportRepository.findByCommentIdInAndReporterId(allCommentIds, viewerId).stream()
+                        .map(r -> r.getComment().getId())
                         .collect(Collectors.toSet());
 
         Set<UUID> reportedPostIds = postReportRepository.findByPostIdInAndReporterId(postIds, viewerId).stream()
@@ -438,7 +477,8 @@ public class PostService {
             }
 
             List<CommentResponse> comments = topLevelByPost.getOrDefault(post.getId(), List.of()).stream()
-                    .map(c -> buildCommentResponseBatched(c, repliesByParent, likeCountByComment, likedByMeCommentIds))
+                    .map(c -> buildCommentResponseBatched(c, repliesByParent, likeCountByComment, likedByMeCommentIds,
+                            reportedByMeCommentIds))
                     .toList();
 
             List<String> images = new ArrayList<>(post.getImages());
@@ -462,13 +502,16 @@ public class PostService {
     }
 
     private CommentResponse buildCommentResponseBatched(Comment comment, Map<UUID, List<Comment>> repliesByParent,
-                                                          Map<UUID, Long> likeCountByComment, Set<UUID> likedByMeCommentIds) {
+                                                          Map<UUID, Long> likeCountByComment, Set<UUID> likedByMeCommentIds,
+                                                          Set<UUID> reportedByMeCommentIds) {
         long likeCount = likeCountByComment.getOrDefault(comment.getId(), 0L);
         boolean likedByMe = likedByMeCommentIds.contains(comment.getId());
+        boolean reportedByMe = reportedByMeCommentIds.contains(comment.getId());
 
         List<CommentResponse> replies = comment.getParentComment() == null
                 ? repliesByParent.getOrDefault(comment.getId(), List.of()).stream()
-                        .map(r -> buildCommentResponseBatched(r, repliesByParent, likeCountByComment, likedByMeCommentIds))
+                        .map(r -> buildCommentResponseBatched(r, repliesByParent, likeCountByComment, likedByMeCommentIds,
+                                reportedByMeCommentIds))
                         .toList()
                 : List.of();
 
@@ -476,9 +519,11 @@ public class PostService {
                 comment.getId(),
                 AuthorSummary.from(comment.getAuthor()),
                 comment.getContent(),
+                comment.getImageUrl(),
                 comment.getCreatedAt(),
                 likeCount,
                 likedByMe,
+                reportedByMe,
                 replies);
     }
 

@@ -160,13 +160,13 @@ class PostControllerTest {
     @Test
     void addComment_returns201_whenValid() throws Exception {
         var commentResponse = new com.mingo.backend.post.dto.CommentResponse(UUID.randomUUID(),
-                new AuthorSummary(UUID.randomUUID(), "Tac Gia", null), "nice post!", Instant.now(), 0L, false, List.of());
+                new AuthorSummary(UUID.randomUUID(), "Tac Gia", null), "nice post!", null, Instant.now(), 0L, false, false, List.of());
         when(postService.addComment(eq("me@example.com"), any(UUID.class), any(CommentRequest.class)))
                 .thenReturn(commentResponse);
 
         mockMvc.perform(authed(post("/posts/{id}/comments", UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new CommentRequest("nice post!", null))))
+                        .content(objectMapper.writeValueAsString(new CommentRequest("nice post!", null, null))))
                 .andExpect(status().isCreated())
                 .andExpect(jsonPath("$.content").value("nice post!"));
     }
@@ -175,7 +175,7 @@ class PostControllerTest {
     void addComment_returns400_whenContentBlank() throws Exception {
         mockMvc.perform(authed(post("/posts/{id}/comments", UUID.randomUUID()))
                         .contentType(MediaType.APPLICATION_JSON)
-                        .content(objectMapper.writeValueAsString(new CommentRequest("", null))))
+                        .content(objectMapper.writeValueAsString(new CommentRequest("", null, null))))
                 .andExpect(status().isBadRequest())
                 .andExpect(jsonPath("$.fieldErrors.content").exists());
     }

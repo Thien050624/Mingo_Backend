@@ -8,6 +8,7 @@ import com.mingo.backend.forum.ForumMessageReportRepository;
 import com.mingo.backend.forum.ForumMessageRepository;
 import com.mingo.backend.forum.ForumService;
 import com.mingo.backend.post.CommentRepository;
+import com.mingo.backend.post.CommentReportRepository;
 import com.mingo.backend.post.Post;
 import com.mingo.backend.post.PostReportRepository;
 import com.mingo.backend.post.PostRepository;
@@ -45,6 +46,7 @@ class AdminServiceTest {
     @Mock private PostReportRepository postReportRepository;
     @Mock private ReactionRepository reactionRepository;
     @Mock private CommentRepository commentRepository;
+    @Mock private CommentReportRepository commentReportRepository;
     @Mock private ForumMessageRepository forumMessageRepository;
     @Mock private ForumMessageReportRepository forumMessageReportRepository;
     @Mock private ForumService forumService;
@@ -61,7 +63,7 @@ class AdminServiceTest {
     @BeforeEach
     void setUp() {
         adminService = new AdminService(userRepository, postRepository, postReportRepository, reactionRepository,
-                commentRepository, forumMessageRepository, forumMessageReportRepository, forumService,
+                commentRepository, commentReportRepository, forumMessageRepository, forumMessageReportRepository, forumService,
                 messageRepository, messageReportRepository, chatService, auditLogRepository);
 
         admin = User.builder().id(UUID.randomUUID()).email("admin@example.com").role(Role.ADMIN).build();

@@ -2,6 +2,7 @@ package com.mingo.backend.admin;
 
 import com.mingo.backend.admin.dto.AdminAuditLogResponse;
 import com.mingo.backend.admin.dto.AdminChatMessageResponse;
+import com.mingo.backend.admin.dto.AdminCommentResponse;
 import com.mingo.backend.admin.dto.AdminForumMessageResponse;
 import com.mingo.backend.admin.dto.AdminPostResponse;
 import com.mingo.backend.admin.dto.AdminStatsResponse;
@@ -15,7 +16,9 @@ import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.forum.ForumMessageReportRepository;
 import com.mingo.backend.forum.ForumMessageRepository;
 import com.mingo.backend.forum.ForumService;
+import com.mingo.backend.post.Comment;
 import com.mingo.backend.post.CommentRepository;
+import com.mingo.backend.post.CommentReportRepository;
 import com.mingo.backend.post.Post;
 import com.mingo.backend.post.PostReportRepository;
 import com.mingo.backend.post.PostRepository;
@@ -51,6 +54,7 @@ public class AdminService {
     private final PostReportRepository postReportRepository;
     private final ReactionRepository reactionRepository;
     private final CommentRepository commentRepository;
+    private final CommentReportRepository commentReportRepository;
     private final ForumMessageRepository forumMessageRepository;
     private final ForumMessageReportRepository forumMessageReportRepository;
     private final ForumService forumService;
@@ -61,7 +65,8 @@ public class AdminService {
 
     public AdminService(UserRepository userRepository, PostRepository postRepository,
                          PostReportRepository postReportRepository, ReactionRepository reactionRepository,
-                         CommentRepository commentRepository, ForumMessageRepository forumMessageRepository,
+                         CommentRepository commentRepository, CommentReportRepository commentReportRepository,
+                         ForumMessageRepository forumMessageRepository,
                          ForumMessageReportRepository forumMessageReportRepository, ForumService forumService,
                          MessageRepository messageRepository, MessageReportRepository messageReportRepository,
                          ChatService chatService, AdminAuditLogRepository auditLogRepository) {
@@ -70,6 +75,7 @@ public class AdminService {
         this.postReportRepository = postReportRepository;
         this.reactionRepository = reactionRepository;
         this.commentRepository = commentRepository;
+        this.commentReportRepository = commentReportRepository;
         this.forumMessageRepository = forumMessageRepository;
         this.forumMessageReportRepository = forumMessageReportRepository;
         this.forumService = forumService;
@@ -90,7 +96,7 @@ public class AdminService {
         long postsToday = postRepository.countByCreatedAtAfter(startOfToday);
         long totalForumMessages = forumMessageRepository.count();
         long reportsPending = postReportRepository.count() + forumMessageReportRepository.count()
-                + messageReportRepository.count();
+                + messageReportRepository.count() + commentReportRepository.count();
         List<Long> userGrowth = computeUserGrowth();
 
         return new AdminStatsResponse(totalUsers, newUsersThisWeek, totalPosts, postsToday,
@@ -219,6 +225,37 @@ public class AdminService {
         forumService.setMessageHidden(messageId, hidden);
         logAction(adminEmail, hidden ? AdminAction.HIDE_FORUM_MESSAGE : AdminAction.UNHIDE_FORUM_MESSAGE,
                 "FORUM_MESSAGE", messageId, null);
+    }
+
+    @Transactional(readOnly = true)
+    public Page<AdminCommentResponse> listCommentReports(Pageable pageable) {
+        return commentRepository.findReportedOrderByCreatedAtDesc(pageable)
+                .map(c -> new AdminCommentResponse(
+                        c.getId(),
+                        c.getPost().getId(),
+                        AuthorSummary.from(c.getAuthor()),
+                        c.getContent(),
+                        c.getCreatedAt(),
+                        commentReportRepository.countByCommentId(c.getId()),
+                        c.isHidden()));
+    }
+
+    @Transactional
+    public void setCommentHidden(String adminEmail, UUID commentId, boolean hidden) {
+        Comment comment = commentRepository.findById(commentId)
+                .orElseThrow(() -> new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy bình luận"));
+        comment.setHidden(hidden);
+        commentRepository.save(comment);
+        logAction(adminEmail, hidden ? AdminAction.HIDE_COMMENT : AdminAction.UNHIDE_COMMENT, "COMMENT", commentId, null);
+    }
+
+    @Transactional
+    public void deleteComment(String adminEmail, UUID commentId) {
+        if (!commentRepository.existsById(commentId)) {
+            throw new ApiException(HttpStatus.NOT_FOUND, "Không tìm thấy bình luận");
+        }
+        commentRepository.deleteById(commentId);
+        logAction(adminEmail, AdminAction.DELETE_COMMENT, "COMMENT", commentId, null);
     }
 
     @Transactional(readOnly = true)

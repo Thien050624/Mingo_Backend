@@ -8,9 +8,11 @@ public record CommentResponse(
         UUID id,
         AuthorSummary author,
         String content,
+        String imageUrl,
         Instant createdAt,
         long likeCount,
         boolean likedByMe,
+        boolean reportedByMe,
         List<CommentResponse> replies
 ) {
 }

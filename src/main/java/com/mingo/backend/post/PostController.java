@@ -5,6 +5,7 @@ import com.mingo.backend.post.dto.CommentResponse;
 import com.mingo.backend.post.dto.CreatePostRequest;
 import com.mingo.backend.post.dto.PostResponse;
 import com.mingo.backend.post.dto.ReactionRequest;
+import com.mingo.backend.post.dto.ReportCommentRequest;
 import com.mingo.backend.post.dto.ReportPostRequest;
 import com.mingo.backend.post.dto.UpdatePostRequest;
 import jakarta.validation.Valid;
@@ -86,6 +87,17 @@ public class PostController {
     @DeleteMapping("/{postId}/comments/{commentId}/like")
     public CommentResponse unlikeComment(Authentication auth, @PathVariable UUID postId, @PathVariable UUID commentId) {
         return postService.unlikeComment(auth.getName(), postId, commentId);
+    }
+
+    @PostMapping("/{postId}/comments/{commentId}/report")
+    public void reportComment(Authentication auth, @PathVariable UUID postId, @PathVariable UUID commentId,
+                               @Valid @RequestBody ReportCommentRequest request) {
+        postService.reportComment(auth.getName(), postId, commentId, request.reason());
+    }
+
+    @DeleteMapping("/{postId}/comments/{commentId}/report")
+    public void unreportComment(Authentication auth, @PathVariable UUID postId, @PathVariable UUID commentId) {
+        postService.unreportComment(auth.getName(), postId, commentId);
     }
 
     @PutMapping("/{id}/reaction")

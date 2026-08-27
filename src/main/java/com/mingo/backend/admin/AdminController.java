@@ -2,11 +2,13 @@ package com.mingo.backend.admin;
 
 import com.mingo.backend.admin.dto.AdminAuditLogResponse;
 import com.mingo.backend.admin.dto.AdminChatMessageResponse;
+import com.mingo.backend.admin.dto.AdminCommentResponse;
 import com.mingo.backend.admin.dto.AdminForumMessageResponse;
 import com.mingo.backend.admin.dto.AdminPostResponse;
 import com.mingo.backend.admin.dto.AdminStatsResponse;
 import com.mingo.backend.admin.dto.AdminSummaryResponse;
 import com.mingo.backend.admin.dto.AdminUserResponse;
+import com.mingo.backend.admin.dto.SetCommentHiddenRequest;
 import com.mingo.backend.admin.dto.SetForumMessageHiddenRequest;
 import com.mingo.backend.admin.dto.SetPostHiddenRequest;
 import com.mingo.backend.admin.dto.SetUserBannedRequest;
@@ -97,6 +99,24 @@ public class AdminController {
     public ResponseEntity<Void> setForumMessageHidden(Authentication auth, @PathVariable UUID id,
                                                         @RequestBody SetForumMessageHiddenRequest request) {
         adminService.setForumMessageHidden(auth.getName(), id, request.hidden());
+        return ResponseEntity.noContent().build();
+    }
+
+    @GetMapping("/comments")
+    public Page<AdminCommentResponse> listCommentReports(@PageableDefault(size = 30) Pageable pageable) {
+        return adminService.listCommentReports(pageable);
+    }
+
+    @PatchMapping("/comments/{id}/hidden")
+    public ResponseEntity<Void> setCommentHidden(Authentication auth, @PathVariable UUID id,
+                                                  @RequestBody SetCommentHiddenRequest request) {
+        adminService.setCommentHidden(auth.getName(), id, request.hidden());
+        return ResponseEntity.noContent().build();
+    }
+
+    @DeleteMapping("/comments/{id}")
+    public ResponseEntity<Void> deleteComment(Authentication auth, @PathVariable UUID id) {
+        adminService.deleteComment(auth.getName(), id);
         return ResponseEntity.noContent().build();
     }
 

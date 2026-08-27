@@ -30,6 +30,7 @@ class PostServiceTest {
     @Mock private PostRepository postRepository;
     @Mock private CommentRepository commentRepository;
     @Mock private CommentLikeRepository commentLikeRepository;
+    @Mock private CommentReportRepository commentReportRepository;
     @Mock private ReactionRepository reactionRepository;
     @Mock private PostReportRepository postReportRepository;
     @Mock private SavedPostRepository savedPostRepository;
@@ -46,7 +47,8 @@ class PostServiceTest {
 
     @BeforeEach
     void setUp() {
-        postService = new PostService(postRepository, commentRepository, commentLikeRepository, reactionRepository,
+        postService = new PostService(postRepository, commentRepository, commentLikeRepository, commentReportRepository,
+                reactionRepository,
                 postReportRepository, savedPostRepository, userRepository, friendshipRepository, userBlockRepository,
                 notificationService, rateLimiter);
 
@@ -66,7 +68,7 @@ class PostServiceTest {
 
     private void stubToResponseCollaborators() {
         when(reactionRepository.findByPostId(any())).thenReturn(List.of());
-        when(commentRepository.findByPostIdAndParentCommentIsNullOrderByCreatedAtAsc(any())).thenReturn(List.of());
+        when(commentRepository.findByPostIdAndParentCommentIsNullAndHiddenFalseOrderByCreatedAtAsc(any())).thenReturn(List.of());
         when(postReportRepository.existsByPostIdAndReporterId(any(), any())).thenReturn(false);
         when(savedPostRepository.existsByUserIdAndPostId(any(), any())).thenReturn(false);
     }
