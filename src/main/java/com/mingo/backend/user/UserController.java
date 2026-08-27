@@ -1,12 +1,12 @@
 package com.mingo.backend.user;
 
 import com.mingo.backend.auth.dto.AuthResponse;
-import com.mingo.backend.chat.dto.ParticipantSummary;
 import com.mingo.backend.user.dto.ChangeEmailRequest;
 import com.mingo.backend.user.dto.ChangePasswordRequest;
 import com.mingo.backend.user.dto.DeleteAccountRequest;
 import com.mingo.backend.user.dto.UpdateProfileRequest;
 import com.mingo.backend.user.dto.UserProfileResponse;
+import com.mingo.backend.user.dto.UserSearchResponse;
 import jakarta.validation.Valid;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
@@ -33,7 +33,7 @@ public class UserController {
     }
 
     @GetMapping("/search")
-    public Page<ParticipantSummary> searchUsers(Authentication authentication, @RequestParam String q,
+    public Page<UserSearchResponse> searchUsers(Authentication authentication, @RequestParam String q,
                                                  @PageableDefault(size = 10) Pageable pageable) {
         return userService.searchUsers(authentication.getName(), q, pageable);
     }

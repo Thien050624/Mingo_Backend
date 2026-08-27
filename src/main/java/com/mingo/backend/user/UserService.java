@@ -1,15 +1,19 @@
 package com.mingo.backend.user;
 
 import com.mingo.backend.auth.dto.AuthResponse;
-import com.mingo.backend.chat.dto.ParticipantSummary;
 import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.common.security.CustomUserDetailsService;
 import com.mingo.backend.common.security.JwtService;
+import com.mingo.backend.friend.FriendshipRepository;
+import com.mingo.backend.friend.FriendshipStatus;
+import com.mingo.backend.post.PostRepository;
+import com.mingo.backend.post.PostVisibility;
 import com.mingo.backend.user.dto.ChangeEmailRequest;
 import com.mingo.backend.user.dto.ChangePasswordRequest;
 import com.mingo.backend.user.dto.DeleteAccountRequest;
 import com.mingo.backend.user.dto.UpdateProfileRequest;
 import com.mingo.backend.user.dto.UserProfileResponse;
+import com.mingo.backend.user.dto.UserSearchResponse;
 import org.springframework.data.domain.Page;
 import org.springframework.data.domain.Pageable;
 import org.springframework.http.HttpStatus;
@@ -19,22 +23,29 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 import org.springframework.util.StringUtils;
 
+import java.util.Set;
 import java.util.UUID;
+import java.util.stream.Collectors;
 
 @Service
 public class UserService {
 
     private final UserRepository userRepository;
     private final UserBlockRepository userBlockRepository;
+    private final FriendshipRepository friendshipRepository;
+    private final PostRepository postRepository;
     private final PasswordEncoder passwordEncoder;
     private final CustomUserDetailsService userDetailsService;
     private final JwtService jwtService;
 
     public UserService(UserRepository userRepository, UserBlockRepository userBlockRepository,
+                        FriendshipRepository friendshipRepository, PostRepository postRepository,
                         PasswordEncoder passwordEncoder, CustomUserDetailsService userDetailsService,
                         JwtService jwtService) {
         this.userRepository = userRepository;
         this.userBlockRepository = userBlockRepository;
+        this.friendshipRepository = friendshipRepository;
+        this.postRepository = postRepository;
         this.passwordEncoder = passwordEncoder;
         this.userDetailsService = userDetailsService;
         this.jwtService = jwtService;
@@ -54,13 +65,27 @@ public class UserService {
         return UserProfileResponse.from(user);
     }
 
-    public Page<ParticipantSummary> searchUsers(String viewerEmail, String query, Pageable pageable) {
+    public Page<UserSearchResponse> searchUsers(String viewerEmail, String query, Pageable pageable) {
         if (!StringUtils.hasText(query)) {
             return Page.empty();
         }
         User viewer = findByEmail(viewerEmail);
         return userRepository.searchUsersExcludingBlocked(query.trim(), viewer.getId(), pageable)
-                .map(ParticipantSummary::from);
+                .map(user -> UserSearchResponse.from(user,
+                        countMutualFriends(viewer.getId(), user.getId()),
+                        postRepository.countVisibleByAuthor(user.getId(), PostVisibility.PUBLIC, viewer.getId())));
+    }
+
+    private long countMutualFriends(UUID viewerId, UUID targetId) {
+        if (viewerId.equals(targetId)) {
+            return 0;
+        }
+        Set<UUID> viewerFriendIds = friendshipRepository.findAllByUserAndStatus(viewerId, FriendshipStatus.ACCEPTED)
+                .stream().map(f -> f.otherThan(viewerId).getId()).collect(Collectors.toSet());
+        Set<UUID> targetFriendIds = friendshipRepository.findAllByUserAndStatus(targetId, FriendshipStatus.ACCEPTED)
+                .stream().map(f -> f.otherThan(targetId).getId()).collect(Collectors.toSet());
+        viewerFriendIds.retainAll(targetFriendIds);
+        return viewerFriendIds.size();
     }
 
     @Transactional

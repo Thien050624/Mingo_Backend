@@ -3,6 +3,8 @@ package com.mingo.backend.user;
 import com.mingo.backend.common.exception.ApiException;
 import com.mingo.backend.common.security.CustomUserDetailsService;
 import com.mingo.backend.common.security.JwtService;
+import com.mingo.backend.friend.FriendshipRepository;
+import com.mingo.backend.post.PostRepository;
 import com.mingo.backend.user.dto.ChangePasswordRequest;
 import com.mingo.backend.user.dto.UpdateProfileRequest;
 import org.junit.jupiter.api.BeforeEach;
@@ -25,6 +27,8 @@ class UserServiceTest {
 
     @Mock private UserRepository userRepository;
     @Mock private UserBlockRepository userBlockRepository;
+    @Mock private FriendshipRepository friendshipRepository;
+    @Mock private PostRepository postRepository;
     @Mock private PasswordEncoder passwordEncoder;
     @Mock private CustomUserDetailsService userDetailsService;
     @Mock private JwtService jwtService;
@@ -36,7 +40,8 @@ class UserServiceTest {
 
     @BeforeEach
     void setUp() {
-        userService = new UserService(userRepository, userBlockRepository, passwordEncoder, userDetailsService, jwtService);
+        userService = new UserService(userRepository, userBlockRepository, friendshipRepository, postRepository,
+                passwordEncoder, userDetailsService, jwtService);
         viewer = User.builder().id(UUID.randomUUID()).email("viewer@example.com").role(Role.USER).build();
         target = User.builder().id(UUID.randomUUID()).email("target@example.com").role(Role.USER).build();
         lenient().when(userRepository.findByEmail("viewer@example.com")).thenReturn(Optional.of(viewer));

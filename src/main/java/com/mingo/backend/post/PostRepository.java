@@ -41,6 +41,16 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
 
     long countByAuthorId(UUID authorId);
 
+    @Query("SELECT COUNT(p) FROM Post p WHERE p.author.id = :authorId " +
+            "AND (p.hidden = false OR p.author.id = :viewerId) " +
+            "AND (p.visibility = :publicVisibility OR p.author.id = :viewerId OR " +
+            "(p.visibility = 'FRIENDS' AND EXISTS (SELECT f FROM Friendship f WHERE f.status = 'ACCEPTED' " +
+            "AND ((f.requester.id = p.author.id AND f.addressee.id = :viewerId) " +
+            "OR (f.requester.id = :viewerId AND f.addressee.id = p.author.id)))))")
+    long countVisibleByAuthor(@Param("authorId") UUID authorId,
+                              @Param("publicVisibility") PostVisibility publicVisibility,
+                              @Param("viewerId") UUID viewerId);
+
     long countByCreatedAtAfter(Instant after);
 
     Page<Post> findAllByOrderByCreatedAtDesc(Pageable pageable);
@@ -60,7 +70,8 @@ public interface PostRepository extends JpaRepository<Post, UUID> {
             "AND (p.author.id = :viewerId OR NOT EXISTS (SELECT b FROM UserBlock b " +
             "WHERE (b.blocker.id = p.author.id AND b.blocked.id = :viewerId) " +
             "OR (b.blocker.id = :viewerId AND b.blocked.id = p.author.id))) " +
-            "AND LOWER(p.content) LIKE LOWER(CONCAT('%', :query, '%')) ORDER BY p.createdAt DESC")
+            "AND (LOWER(p.content) LIKE LOWER(CONCAT('%', :query, '%')) " +
+            "OR LOWER(p.author.displayName) LIKE LOWER(CONCAT('%', :query, '%'))) ORDER BY p.createdAt DESC")
     Page<Post> searchVisibleTo(@Param("query") String query,
                                @Param("publicVisibility") PostVisibility publicVisibility,
                                @Param("viewerId") UUID viewerId,
